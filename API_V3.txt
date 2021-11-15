@@ -1,0 +1,438 @@
+#!/usr/bin/venv python
+# -*- coding: utf-8 -*-
+
+"""
+Created on Thu Ene 1 16:131:13 2020
+
+@author: Equipo de Analitica XM
+"""
+import requests
+import json
+import pandas as pd
+import datetime as dt
+import numpy as np
+import time
+from openpyxl import load_workbook
+
+class ReadDB(object):
+
+    def __init__(self):
+        """This object was created to extract data from API XM"""
+
+        self.url = "http://servapibi.xm.com.co/hourly"
+        self.connection = None
+        self.request = ''
+        lectura = requests.get(r'https://raw.githubusercontent.com/EquipoAnaliticaXM/API_XM/master/pydataxm/metricasAPI.json').json()
+        self.inventario_metricas = json.loads(lectura)
+        
+    def get_collections(self, coleccion):
+
+        return self.inventario_metricas[coleccion]
+
+    def request_data(self, coleccion, metrica, start_date, end_date):
+        """ request public server data from XM by the API
+        Args:
+            coleccion: one of the set of variables availables at self.get_collections()
+            metrica:one of this variables "DemaCome", "Gene", "GeneIdea", "PrecBolsNaci", "RestAliv"
+            start_date: start date consult data
+            end_date: end date consult data
+        Returns: DataFrame with the raw Data
+        """
+        if coleccion not in self.inventario_metricas.keys():
+            print('No existe la colección {}'.format(coleccion))
+            return pd.DataFrame()
+        if metrica > len(self.inventario_metricas[coleccion]):
+            print('No existe la metrica')
+            return pd.DataFrame()
+
+        if self.inventario_metricas[coleccion][metrica][3] == 'Horaria':
+
+            end = end_date
+            condition = True
+            aux = True
+            data = None
+            while condition:
+                if (start_date - end_date).days < 30:
+                    end = start_date + dt.timedelta(29)
+                if end > end_date:
+                    end = end_date
+                self.request = {"MetricId": coleccion,
+                                "StartDate": "{}".format(str(start_date)),
+                                "EndDate": "{}".format(str(end)),
+                                'Entity': self.inventario_metricas[coleccion][metrica][2]}
+
+                self.connection = requests.post(self.url, json=self.request)
+
+                data_json = json.loads(self.connection.content)
+
+                temporal_data = pd.json_normalize(data_json['Items'], 'HourlyEntities', 'Date', sep='_')
+
+                if data is None:
+                    data = temporal_data.copy()
+                else:
+                    data = data.append(temporal_data, ignore_index=True)
+                start_date = start_date + dt.timedelta(30)
+
+                if end == end_date:
+                    aux = False
+                condition = ((end - start_date).days > 30 | (end - end_date).days != 0) | aux
+        elif self.inventario_metricas[coleccion][metrica][3] == 'Diaria' and coleccion == 'CapEfecNeta':
+            end = end_date
+            condition = True
+            aux = True
+            data = None
+            while condition:
+                if (start_date - end_date).days < 1:
+                    end = start_date + dt.timedelta(0)
+                if end > end_date:
+                    end = end_date
+                self.request = {"MetricId": coleccion,
+                                "StartDate": "{}".format(str(start_date)),
+                                "EndDate": "{}".format(str(end)),
+                                'Entity': self.inventario_metricas[coleccion][metrica][2]}
+                self.url = self.url.replace('hourly', 'daily')
+                self.connection = requests.post(self.url, json=self.request)
+
+                data_json = json.loads(self.connection.content)
+
+                temporal_data = pd.json_normalize(data_json['Items'], 'DailyEntities', 'Date', sep='_')
+
+                if data is None:
+                    data = temporal_data.copy()
+                else:
+                    data = data.append(temporal_data, ignore_index=True)
+                start_date = start_date + dt.timedelta(1)
+
+                if end == end_date:
+                    aux = False
+                condition = ((end - start_date).days > 1 | (end - end_date).days != 0) | aux
+        elif self.inventario_metricas[coleccion][metrica][3] == 'Diaria':
+            end = end_date
+            condition = True
+            aux = True
+            data = None
+            while condition:
+                if (start_date - end_date).days < 30:
+                    end = start_date + dt.timedelta(29)
+                if end > end_date:
+                    end = end_date
+
+                self.request = {"MetricId": coleccion,
+                                "StartDate": "{}".format(str(start_date)),
+                                "EndDate": "{}".format(str(end)),
+                                'Entity': self.inventario_metricas[coleccion][metrica][2]}
+                self.url = self.url.replace('hourly', 'daily')
+                self.connection = requests.post(self.url, json=self.request)
+                data_json = json.loads(self.connection.content)
+                temporal_data = pd.json_normalize(data_json['Items'], 'DailyEntities', 'Date', sep='_')
+                if data is None:
+                    data = temporal_data.copy()
+                else:
+                    data = data.append(temporal_data, ignore_index=True)
+
+                start_date = start_date + dt.timedelta(30)
+                if end == end_date:
+                    aux = False
+                condition = ((end - start_date).days > 29 | (end - end_date).days != 0) | aux
+
+        elif self.inventario_metricas[coleccion][metrica][3] == 'Mensual':
+            
+            end = end_date
+            condition = True
+            aux = True
+            data = None
+            while condition:
+                if (start_date - end_date).days < 732:
+                    end = start_date + dt.timedelta(731)
+                if end > end_date:
+                    end = end_date
+
+                self.request = {"MetricId": coleccion,
+                                "StartDate": "{}".format(str(start_date)),
+                                "EndDate": "{}".format(str(end)),
+                                'Entity': self.inventario_metricas[coleccion][metrica][2]}
+                self.url = self.url.replace('hourly', 'monthly')
+                self.connection = requests.post(self.url, json=self.request)
+                data_json = json.loads(self.connection.content)
+                temporal_data = pd.json_normalize(data_json['Items'], 'MonthlyEntities', sep='_')
+                if data is None:
+                    data = temporal_data.copy()
+                else:
+                    data = data.append(temporal_data, ignore_index=True)
+
+                start_date = start_date + dt.timedelta(732)
+                if end == end_date:
+                    aux = False
+                condition = ((end - start_date).days > 731 | (end - end_date).days != 0) | aux
+
+        elif self.inventario_metricas[coleccion][metrica][3] == 'Anual':
+
+            end = end_date
+            condition = True
+            aux = True
+            data = None
+            while condition:
+                if (start_date - end_date).days < 366:
+                    end = start_date + dt.timedelta(365)
+                if end > end_date:
+                    end = end_date
+
+                self.request = {"MetricId": coleccion,
+                                "StartDate": "{}".format(str(start_date)),
+                                "EndDate": "{}".format(str(end)),
+                                'Entity': self.inventario_metricas[coleccion][metrica][2]}
+                self.url = self.url.replace('hourly', 'annual')
+                self.connection = requests.post(self.url, json=self.request)
+                data_json = json.loads(self.connection.content)
+                temporal_data = pd.json_normalize(data_json['Items'], 'AnnualEntities', 'Code', sep='_')
+                if data is None:
+                    data = temporal_data.copy()
+                else:
+                    data = data.append(temporal_data, ignore_index=True)
+
+                start_date = start_date + dt.timedelta(366)
+                if end == end_date:
+                    aux = False
+                condition = ((end - start_date).days > 365 | (end - end_date).days != 0) | aux
+
+
+        elif self.inventario_metricas[coleccion][metrica][3] == 'Lista':
+            self.request = {"MetricId": coleccion,
+                                # "StartDate": "{}".format(str(start_date)),
+                                # "EndDate": "{}".format(str(end)),
+                                'Entity': self.inventario_metricas[coleccion][metrica][2]}
+            self.url = self.url.replace('hourly', 'lists')
+            self.connection = requests.post(self.url, json=self.request)
+            data_json = json.loads(self.connection.content)
+            data = pd.json_normalize(data_json['Items'], 'ListEntities','Date', sep='_')
+            
+        return data
+
+def calculate_sheet(book,hoja,columna):
+    sheet=book[hoja]
+    for cell in sheet[columna]:
+        if cell.value is None:
+            fila= cell.row
+            break
+        else:
+            fila= cell.row + 1
+    rango="A"+str(fila)
+    fecha=sheet[rango].value
+    fecha=fecha.date()
+    return fecha,fila
+
+def calculate_sheetG(book,hoja):
+    sheet=book[hoja]
+    for cell in sheet["A"]:
+        if cell.value is None:
+            fila= cell.row-1
+            break
+        else:
+            fila= cell.row-1
+    rango="A"+str(fila)
+    fecha=sheet[rango].value
+    fecha=dt.datetime.strptime(fecha,'%Y-%m-%d').date()+dt.timedelta(days=1)
+    return fecha,fila
+
+def calculate_dataframe (MW,borrar,factor):
+    MW=MW.to_numpy()
+    MW=np.delete(MW,borrar,axis=1)
+    MW[MW=='']='0'
+    MW=MW.astype(float)
+    MW=MW.sum(axis=1)/factor
+    return MW
+
+def calculate_numericG (MW,borrar,factor,granularidad):
+    MF=MW['Date']
+    MG=MW[granularidad]
+    MW=MW.to_numpy()
+    MW=np.delete(MW,borrar,axis=1)
+    MW[MW=='']='0'
+    MW=MW.astype(float)
+    MW=MW.sum(axis=1)/factor
+    return MW,MF, MG
+
+def actualizaDBComun (hoja,columna,borrar,factor,codigo,indice,ncolumna):
+        
+    # try:
+    fecha,fila=calculate_sheet(book,hoja,columna)
+    variable=consult.request_data(codigo, indice, fecha, dt.date.today())
+    if len(variable)>0:
+            variable=calculate_dataframe(variable,borrar,factor)
+            variable=pd.DataFrame(variable)
+            writer.sheets = dict((ws.title, ws) for ws in book.worksheets)
+            variable.to_excel(writer, sheet_name=hoja,startrow= fila-1,startcol=ncolumna-1,header=False,index=False)
+    #except:
+        #pass
+    return 
+
+def actualizaDBGranular (hoja,borrar,factor,codigo,indice,granularidad):
+    try:
+        fecha,fila=calculate_sheetG(book,hoja)
+        variable=consult.request_data(codigo, indice, fecha, dt.date.today())
+        if len(variable)>0:
+            variableValor, variableFecha, variableGranularidad=calculate_numericG(variable,borrar,factor,granularidad)
+            variableValor=pd.DataFrame(variableValor)
+            writer.sheets = dict((ws.title, ws) for ws in book.worksheets)
+            variableValor.to_excel(writer, sheet_name=hoja,startrow= fila,startcol=3,header=False,index=False)
+            variableFecha.to_excel(writer, sheet_name=hoja,startrow= fila,startcol=0,header=False,index=False)
+            variableGranularidad.to_excel(writer, sheet_name=hoja,startrow= fila,startcol=1,header=False,index=False)
+    except:
+        pass
+    return  
+
+def actualizaEstaticas (hoja,metrica,nivel,delta):
+    variable=consult.request_data(metrica, nivel, (dt.date.today() - dt.timedelta(days=delta)), (dt.date.today() - dt.timedelta(days=delta)))
+    variable.to_excel(writer, sheet_name=hoja)
+    return 
+
+def filtraValores(libro, columna,referencia):
+    sheet=book["General"]
+    i=1
+    for cell in sheet[columna]:
+        i=i+1
+        rango=columna+str(i)
+        try:
+            if sheet[rango].value < referencia:
+                    sheet[rango]=None
+        except:
+            pass
+    return
+
+if __name__ == "__main__":
+    inicio = time.time()
+    consult = ReadDB()
+    print("0% - " + str(int(time.time()-inicio))+" segundos")
+    ubicacion= r"C:\Users\Jhon Fabio Zuñiga\Ministerio de Minas y Energía\Dirección de Energía Eléctrica - DEE_GestionSE - GSEC\1. Monitoreo del sector\POWERBI GSEC\API XM\DBXMV3.xlsx"
+    book = load_workbook(ubicacion)
+    writer = pd.ExcelWriter(ubicacion, engine='openpyxl')
+    writer.book = book
+    
+    print("5% - " + str(int(time.time()-inicio))+" segundos")
+    
+    actualizaDBComun("General", "B", (0,1,26), 1000000, "Gene", 0, 2)
+    actualizaDBComun("General", "C", (0,1,26), 1000000, "DemaCome", 0,3)
+    actualizaDBComun("General", "D", (0,2), 1000000, "AporEner", 0,4)
+    actualizaDBComun("General", "E", (0,2), 1, "PrecEscaAct", 0,5)
+
+if __name__ == "__main__":
+    consult = ReadDB()   
+    actualizaDBComun("General", "F", (0,1,26), 24, "PrecBolsNaci", 0,6)
+    actualizaDBComun("General", "G", (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22,23,24,25,26), 1, "MaxPrecOferNal", 0,7)
+    actualizaDBComun("General", "H", (0,1,26), 1, "RestAliv", 0,8)
+    actualizaDBComun("General", "I", (0,1,26), 1000000, "GeneIdea", 0,9)
+    actualizaDBComun("General", "J", (0,2), 1000000, "VoluUtilDiarEner", 0,10)
+    actualizaDBComun("General", "K", (0,2), 1, "RemuRealIndiv", 0,11)
+    print("10% - " + str(int(time.time()-inicio))+" segundos")
+if __name__ == "__main__":
+    consult = ReadDB()    
+    actualizaDBComun("General", "L", (0,1,26), 1000000, "VentContEner", 0,12)
+    actualizaDBComun("General", "M", (0,1,26), 1000000, "CompBolsNaciEner", 0,13)
+    actualizaDBComun("General", "N", (0,1,26), 24, "PrecPromContRegu", 0,14)
+    actualizaDBComun("General", "O", (0,1,26), 24, "PrecPromContNoRegu", 0,15)
+
+if __name__ == "__main__":
+    consult = ReadDB()
+    actualizaDBComun("General", "P", (0,1,26), 24, "factorEmisionCO2e", 0,16)
+    actualizaDBComun("General", "Q", (0,1,26), 1000000, "ImpoEner", 0,17)
+    actualizaDBComun("General", "R", (0,1,26), 1000000, "PerdidasEner", 0,18)
+    actualizaDBComun("General", "S", (0,2), 1000000, "DemaSIN", 0,19)
+    print("15% - " + str(int(time.time()-inicio))+" segundos")
+if __name__ == "__main__":
+    consult = ReadDB()
+    actualizaDBComun("General", "T", (0,2), 1000000, "CapaUtilDiarEner", 0,20)
+    actualizaDBComun("General", "U", (0,2), 1000000, "AporEnerMediHist", 0,21)
+    print("20% - " + str(int(time.time()-inicio))+" segundos")
+if __name__ == "__main__":
+    consult = ReadDB()    
+    actualizaDBGranular("GeneracionRecurso", (0,1,26), 1000000, "Gene", 1,"Values_code")
+    print("25% - " + str(int(time.time()-inicio))+" segundos")
+    actualizaDBGranular("DemandaAgente", (0,1,26), 1000000, "DemaCome", 1,"Values_code")
+    print("30% - " + str(int(time.time()-inicio))+" segundos")
+    actualizaDBGranular("AportesRecurso", (0,1,3), 1000000, "AporEner", 1,"Name")
+
+if __name__ == "__main__":
+    consult = ReadDB() 
+    actualizaDBGranular("ConsCombustibleMBTU", (0,1,2,27), 1, "ConsCombustibleMBTU", 0,"Values_code")
+    actualizaDBGranular("PrecOferDesp", (0,1,26), 24, "PrecOferDesp", 0,"Values_code")
+    print("35% - " + str(int(time.time()-inicio))+" segundos")
+    actualizaDBGranular("generacionIdealRecurso", (0,1,2,3,4,5,6,29), 1000000, "GeneIdea", 1,"Values_code")
+    actualizaDBGranular("volumenUtilEmbalse", (0,1,3), 1000000, "VoluUtilDiarEner", 1,"Name")
+    print("40% - " + str(int(time.time()-inicio))+" segundos")
+    
+if __name__ == "__main__":
+    consult = ReadDB()     
+    actualizaDBGranular("ventaContratosAgente", (0,1,26), 1000000, "VentContEner", 1,"Values_code")
+    actualizaDBGranular("compraContratosAgente", (0,1,26), 1000000, "CompContEner", 1,"Values_code")
+    actualizaDBGranular("compraBolsaAgentes", (0,1,26), 1000000, "CompBolsNaciEner", 1,"Values_code")
+    actualizaDBGranular("emisionesCO2", (0,1,2,27), 1, "EmisionesCO2", 0,"Values_Name")
+    actualizaDBGranular("emisionesCH4", (0,1,2,27), 1, "EmisionesCH4", 0,"Values_Name")
+    actualizaDBGranular("emisionesN20", (0,1,2,27), 1, "EmisionesN2O", 0,"Values_Name")
+    print("45% - " + str(int(time.time()-inicio))+" segundos")
+    
+if __name__ == "__main__":
+    consult = ReadDB()   
+    actualizaDBGranular("demandaOR", (0,1,26), 1000000, "DemaOR", 0,"Values_code")
+    actualizaDBGranular("DNAProgramadaArea", (0,1,3), 1000, "DemaNoAtenProg", 0,"Name")
+    actualizaDBGranular("DNAProgramadaSubarea", (0,1,3), 1000, "DemaNoAtenProg", 1,"Name")
+    actualizaDBGranular("DNANoProgramadaArea", (0,1,3), 1000, "DemaNoAtenNoProg", 0,"Name")
+    actualizaDBGranular("DNANoProgramadaSubarea", (0,1,3), 1000, "DemaNoAtenNoProg", 1,"Name")
+    print("50% - " + str(int(time.time()-inicio))+" segundos")
+    
+if __name__ == "__main__":
+    consult = ReadDB() 
+    actualizaDBGranular("generacionSeguridad", (0,1,26), 1000, "GeneSeguridad", 0,"Values_code")
+    actualizaDBGranular("generacionFueraMerito", (0,1,26), 1000, "GeneFueraMerito", 0,"Values_code")
+    actualizaDBGranular("CIIU", (0,1,2,28), 1000000, "DemaComeNoReg", 2,"Values_Activity")
+    print("55% - " + str(int(time.time()-inicio))+" segundos")
+if __name__ == "__main__":
+    consult = ReadDB()
+    actualizaDBComun("General", "V", (0,2), 1, "FAZNI", 0,22)
+    print("60% - " + str(int(time.time()-inicio))+" segundos")
+if __name__ == "__main__":
+    consult = ReadDB()
+    actualizaDBComun("General", "W", (0,1,26), 1000000, "DemaComeReg", 0,23)
+    print("65% - " + str(int(time.time()-inicio))+" segundos")
+if __name__ == "__main__":
+    consult = ReadDB() 
+    actualizaDBComun("General", "X", (0,1,26), 1000000, "DemaComeNoReg", 0,24)
+    actualizaDBComun("General", "Y", (0,1,26), 1, "RestSinAliv", 0,25)
+    print("70% - " + str(int(time.time()-inicio))+" segundos")
+if __name__ == "__main__":
+    consult = ReadDB()
+    actualizaEstaticas("Agentes", "ListadoAgentes", 0,5)
+    actualizaEstaticas("Recursos", "ListadoRecursos", 0,5)
+    print("75% - " + str(int(time.time()-inicio))+" segundos")
+if __name__ == "__main__":
+    consult = ReadDB()
+    actualizaEstaticas("OEF", "ObligEnerFirme", 0,5)
+    actualizaEstaticas("CEN", "CapEfecNeta", 0,5)
+    actualizaEstaticas("capacidadUtilEmbalse", "CapaUtilDiarEner", 1,15)
+    print("80% - " + str(int(time.time()-inicio))+" segundos")
+if __name__ == "__main__":
+    consult = ReadDB()
+    PRONE = consult.request_data("PRONE", 0, dt.date(2020, 1, 1), dt.date.today())
+    FAER = consult.request_data("FAER", 0, dt.date(2020, 1, 1), dt.date.today())
+    Fondos= pd.concat([PRONE,FAER], axis=1)
+    Fondos.to_excel(writer, sheet_name='Fondos')
+    print("85% - " + str(int(time.time()-inicio))+" segundos")
+if __name__ == "__main__":
+    consult = ReadDB()
+    obtieneyear= dt.date.today().year -1
+    MediaRio = consult.request_data("AporEnerMediHist", 1, dt.date(obtieneyear, 1, 1), dt.date(obtieneyear, 12, 31))
+    MediaRio.to_excel(writer, sheet_name='MediaHistoricaRecurso')
+    print("90% - " + str(int(time.time()-inicio))+" segundos")
+    filtraValores(book,"S",150)
+    filtraValores(book,"W",100)
+    filtraValores(book,"X",40)
+    filtraValores(book,"Y",100000000)
+    writer.save()
+    writer.close()
+    print("95% - " + str(int(time.time()-inicio))+" segundos")
+
+    print("100% - " + str(int(time.time()-inicio))+" segundos")
+    print("Información actualizada correctamente desde DB XM SA ESP")
+
+
+
+
